@@ -19,7 +19,7 @@ import os
 
 import yaml
 
-from .graph import DOCKER_FROM, MODULE_SOURCE
+from .graph import DOCKER_FROM, MODULE_SOURCE, tf_producer
 
 API = "https://api.github.com"
 IAC_SUFFIXES = (".tf",)
@@ -121,7 +121,8 @@ class OrgCrawler:
         seen_edges: set[tuple[str, str]] = set()
 
         for repo, branch in self.repos():
-            node = f"repo:{repo}"
+            repo_slug = f"{self.org}/{repo}"
+            node = f"repo:{repo_slug}"
             paths = self.tree(repo, branch)
             iac = [p for p in paths
                    if p.endswith(IAC_SUFFIXES) or os.path.basename(p) in IAC_NAMES]
@@ -129,7 +130,7 @@ class OrgCrawler:
                 text = self.file(repo, path, branch)
                 if not text:
                     continue
-                for producer in _producers_consumed(path, text):
+                for producer in _producers_consumed(path, text, repo_slug):
                     key = (node, producer)
                     if key not in seen_edges:
                         seen_edges.add(key)
@@ -140,11 +141,11 @@ class OrgCrawler:
         return {"edges": edges, "owners": owners, "critical": []}
 
 
-def _producers_consumed(path: str, text: str) -> list[str]:
+def _producers_consumed(path: str, text: str, repo_slug: str | None = None) -> list[str]:
     out: list[str] = []
     base = os.path.basename(path)
     if path.endswith(".tf"):
-        out += [f"tfmodule:{_module_name(s)}" for s in MODULE_SOURCE.findall(text)]
+        out += [tf_producer(s, path, repo_slug) for s in MODULE_SOURCE.findall(text)]
     elif base == "Dockerfile":
         for b in DOCKER_FROM.findall(text):
             b = b.split(":")[0]
@@ -158,6 +159,43 @@ def _producers_consumed(path: str, text: str) -> list[str]:
         except yaml.YAMLError:
             pass
     return out
+
+
+def crawl_orgs(orgs: list[str], token: str | None, max_repos: int = 1000) -> dict:
+    """Crawl several orgs with one token and merge into a single graph."""
+    return merge([OrgCrawler(o, token, max_repos).build() for o in orgs])
+
+
+def merge(datas: list[dict]) -> dict:
+    """Union of several org graphs — dedup edges, union owners + critical.
+
+    Use this to combine orgs crawled with *different* tokens (run `crawl --org`
+    per org, then `merge` the YAMLs), or any mix of crawled + hand-written graphs.
+    """
+    edges: list[dict] = []
+    owners: dict[str, list[str]] = {}
+    critical: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for d in datas:
+        for e in d.get("edges", []) or []:
+            k = (e["consumer"], e["depends_on"])
+            if k not in seen:
+                seen.add(k)
+                edges.append(e)
+        for node, handles in (d.get("owners", {}) or {}).items():
+            owners.setdefault(node, [])
+            for h in handles:
+                if h not in owners[node]:
+                    owners[node].append(h)
+        for c in d.get("critical", []) or []:
+            if c not in critical:
+                critical.append(c)
+    return {"edges": edges, "owners": owners, "critical": critical}
+
+
+def load(path: str) -> dict:
+    with open(path, encoding="utf-8") as fh:
+        return yaml.safe_load(fh) or {}
 
 
 def write(data: dict, out_path: str) -> None:

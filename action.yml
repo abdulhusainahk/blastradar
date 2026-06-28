@@ -26,6 +26,7 @@ runs:
         FILES=$(git diff --name-only "$BASE"...HEAD)
         python -m blastradar gate --root "${{ inputs.root }}" \
           --consumers "${{ inputs.consumers }}" \
+          --repo "${{ github.repository }}" \
           --gate-at "${{ inputs.gate-at }}" \
           --out "$GITHUB_WORKSPACE/blastradar-report.md" \
           --changed $FILES

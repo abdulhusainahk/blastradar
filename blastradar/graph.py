@@ -26,6 +26,62 @@ MODULE_SOURCE = re.compile(r'module\s+"[^"]+"\s*{[^}]*?source\s*=\s*"([^"]+)"', 
 DOCKER_FROM = re.compile(r'^\s*FROM\s+([^\s]+)', re.MULTILINE | re.IGNORECASE)
 
 
+# --------------------------------------------------------------------------- #
+# Source-URL keying — repo+path-qualified Terraform module identities so that  #
+# two different modules both named "network" never collide across repos/orgs. #
+# --------------------------------------------------------------------------- #
+def _norm_subdir(p: str) -> str:
+    """Normalize a path, resolving '.'/'..' without touching the filesystem."""
+    parts: list[str] = []
+    for seg in p.replace("\\", "/").split("/"):
+        if seg in ("", "."):
+            continue
+        if seg == "..":
+            if parts:
+                parts.pop()
+        else:
+            parts.append(seg)
+    return "/".join(parts)
+
+
+def parse_git_source(source: str):
+    """A cross-repo Terraform git source -> (owner/repo, subdir), else None.
+
+    e.g. git::https://github.com/orgB/tf-modules//modules/network?ref=v1
+         -> ("orgB/tf-modules", "modules/network")
+    """
+    if "github.com" not in source:
+        return None
+    after = source.split("github.com", 1)[1].lstrip(":/").split("?", 1)[0]
+    repo_part, subdir = (after.split("//", 1) + [""])[:2]
+    owner_repo = repo_part[:-4] if repo_part.endswith(".git") else repo_part
+    return owner_repo.strip("/"), subdir.strip("/")
+
+
+def tfmodule_key(owner_repo: str, subdir: str) -> str:
+    return f"tfmodule:{owner_repo}//{subdir}" if subdir else f"tfmodule:{owner_repo}"
+
+
+def local_subdir(consumer_file_rel: str, source: str) -> str:
+    """Resolve a local module source to a repo-root-relative subdir."""
+    base = os.path.dirname(consumer_file_rel.replace("\\", "/"))
+    return _norm_subdir(f"{base}/{source}")
+
+
+def tf_producer(source: str, consumer_file_rel: str, repo_slug: str | None) -> str:
+    """The producer node a Terraform module `source` points to.
+
+    Qualified by repo+subdir when we know the org/repo context (cross-repo via
+    the git URL, or intra-repo via `repo_slug`); name-only as a fallback.
+    """
+    git = parse_git_source(source)
+    if git:
+        return tfmodule_key(*git)
+    if source.startswith((".", "/")) and repo_slug:
+        return tfmodule_key(repo_slug, local_subdir(consumer_file_rel, source))
+    return f"tfmodule:{source.rstrip('/').split('/')[-1]}"
+
+
 class InfraGraph:
     def __init__(self) -> None:
         self.deps: dict[str, set[str]] = defaultdict(set)   # consumer -> {producers}
@@ -71,9 +127,12 @@ def _seg_after(path: str, key: str) -> str | None:
     return None
 
 
-def nodes_for_path(path: str, root: str = ".") -> list[str]:
+def nodes_for_path(path: str, root: str = ".", repo_slug: str | None = None) -> list[str]:
     """Best-effort: which graph node(s) does a changed file belong to."""
     p = path.replace("\\", "/")
+    # Qualified mode: a changed .tf file IS the module at its directory.
+    if repo_slug and p.endswith(".tf"):
+        return [tfmodule_key(repo_slug, _norm_subdir(os.path.dirname(p)))]
     if (m := _seg_after(p, "modules")):
         return [f"tfmodule:{m}"]
     if (c := _seg_after(p, "charts")):
@@ -106,7 +165,8 @@ def _k8s_objects(full_path: str):
 # --------------------------------------------------------------------------- #
 # Graph construction                                                          #
 # --------------------------------------------------------------------------- #
-def build_graph(root: str, consumers_file: str | None = None) -> InfraGraph:
+def build_graph(root: str, consumers_file: str | None = None,
+                repo_slug: str | None = None) -> InfraGraph:
     g = InfraGraph()
     for dirpath, _dirs, files in os.walk(root):
         if ".git" in dirpath.split(os.sep):
@@ -115,7 +175,7 @@ def build_graph(root: str, consumers_file: str | None = None) -> InfraGraph:
             full = os.path.join(dirpath, fn)
             rel = os.path.relpath(full, root)
             if fn.endswith(".tf"):
-                _parse_terraform(g, full, rel)
+                _parse_terraform(g, full, rel, repo_slug)
             elif fn == "Dockerfile":
                 _parse_dockerfile(g, full, rel)
             elif fn in ("Chart.yaml", "Chart.yml"):
@@ -127,7 +187,7 @@ def build_graph(root: str, consumers_file: str | None = None) -> InfraGraph:
     return g
 
 
-def _parse_terraform(g: InfraGraph, full: str, rel: str) -> None:
+def _parse_terraform(g: InfraGraph, full: str, rel: str, repo_slug: str | None = None) -> None:
     consumer = _owning_node(rel)
     g.add_node(consumer)
     try:
@@ -135,9 +195,8 @@ def _parse_terraform(g: InfraGraph, full: str, rel: str) -> None:
     except OSError:
         return
     for source in MODULE_SOURCE.findall(text):
-        if source.startswith((".", "/")):       # local module reference
-            name = source.rstrip("/").split("/")[-1]
-            g.add_edge(consumer, f"tfmodule:{name}")
+        if parse_git_source(source) or source.startswith((".", "/")):
+            g.add_edge(consumer, tf_producer(source, rel, repo_slug))
 
 
 def _parse_dockerfile(g: InfraGraph, full: str, rel: str) -> None:

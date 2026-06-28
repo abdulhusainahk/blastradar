@@ -79,6 +79,31 @@ comments the report, **@-mentions the downstream owners**, and **fails the check
 `ANTHROPIC_API_KEY` for Claude's narrative. Make the check **required** in branch protection
 to actually block merges.
 
+### Multiple organizations
+
+```bash
+# One token that can read all the orgs:
+python -m blastradar crawl --orgs org-a,org-b,org-c --out org-graph.yaml
+
+# Or per-org tokens (run each separately), then merge the outputs:
+python -m blastradar crawl --org org-a --out a.yaml   # token A
+python -m blastradar crawl --org org-b --out b.yaml   # token B
+python -m blastradar merge a.yaml b.yaml --out org-graph.yaml
+```
+
+A change in `org-b/tf-modules` then surfaces consumers in `org-a` *and* `org-c`, and @-mentions
+each repo's CODEOWNERS. The only hard requirement is **read access to every org** (one token, or
+per-org tokens + `merge`).
+
+### How keys avoid collisions (source-URL keying)
+
+Cross-repo Terraform identities are **repo+path-qualified**, not name-only — a module referenced
+as `git::https://github.com/orgB/tf-modules//modules/network` becomes
+`tfmodule:orgB/tf-modules//modules/network`. So two different modules both named `network` in
+different repos/orgs never get confused. This requires the gate to know its own repo: the
+[Action](action.yml) passes `--repo ${{ github.repository }}` automatically. (The local
+hand-written demo runs in simpler name-mode — see below.)
+
 ### Validate it on GitHub
 1. Open a PR in a gated repo that edits a **shared** artifact (a Terraform module others use).
 2. The `blastradar` check runs → a comment appears: risk level, the exact downstream services,
@@ -107,9 +132,9 @@ radius" changes — it makes out-of-repo consumers visible to the gate.
 ## Roadmap
 
 - **v0.1** — Terraform/Helm/K8s/Docker parsing, blast-radius gate, heuristic + Claude, GitHub Action
-- **v0.2** — ✅ org-wide crawler (auto-builds the graph from all repos) + ✅ CODEOWNERS-based downstream-owner @-mentions *(this release)*
-- **v0.3** — GitHub App (no PATs), incremental crawl + caching, reviewer auto-request where collaborators allow
-- **v0.4** — MCP tool wrapper ("what's the blast radius of bumping module X?") + risk-trend dashboard
+- **v0.2** — ✅ org-wide crawler + ✅ CODEOWNERS @-mentions + ✅ **multi-org crawl/merge** + ✅ **source-URL-qualified keys** *(this release)*
+- **v0.3** — GitHub App auth (no PATs), webhook-triggered incremental crawl + caching, downstream-repo issue/check creation
+- **v0.4** — live runtime-impact fusion (weight risk by current traffic / error-budget burn) + MCP tool wrapper + risk-trend dashboard
 
 ## License
 

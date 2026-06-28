@@ -40,8 +40,8 @@ def cmd_gate(args) -> int:
         os.path.join(args.root, "consumers.yaml")
         if os.path.exists(os.path.join(args.root, "consumers.yaml")) else None)
 
-    g = graph.build_graph(args.root, consumers)
-    br = radius.compute(g, changed, args.root)
+    g = graph.build_graph(args.root, consumers, repo_slug=args.repo)
+    br = radius.compute(g, changed, args.root, repo_slug=args.repo)
     assessment = risk.assess(br, changed, high_threshold=3)
     notify = graph.owners_of(g, br.affected)
     md, passed = report.render(br, assessment, gate_at=args.gate_at, notify=notify)
@@ -61,11 +61,22 @@ def cmd_crawl(args) -> int:
     if not token:
         print("error: set --token or GITHUB_TOKEN (needs read access to org repos)", file=sys.stderr)
         return 2
-    crawler = crawl.OrgCrawler(args.org, token, max_repos=args.max_repos)
-    data = crawler.build()
+    orgs = [o.strip() for o in (args.orgs or args.org or "").split(",") if o.strip()]
+    if not orgs:
+        print("error: provide --org <name> or --orgs a,b,c", file=sys.stderr)
+        return 2
+    data = crawl.crawl_orgs(orgs, token, max_repos=args.max_repos)
     crawl.write(data, args.out)
-    print(f"Wrote {args.out}: {len(data['edges'])} edges across the org, "
+    print(f"Wrote {args.out}: {len(data['edges'])} edges across {len(orgs)} org(s), "
           f"{len(data['owners'])} repos with CODEOWNERS.")
+    return 0
+
+
+def cmd_merge(args) -> int:
+    data = crawl.merge([crawl.load(f) for f in args.files])
+    crawl.write(data, args.out)
+    print(f"Merged {len(args.files)} graph(s) -> {args.out}: "
+          f"{len(data['edges'])} edges, {len(data['owners'])} owned nodes.")
     return 0
 
 
@@ -78,16 +89,26 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--changed", nargs="*", default=None)
     g.add_argument("--changed-from-git", metavar="BASE")
     g.add_argument("--consumers", default=None, help="org-graph.yaml / consumers.yaml")
+    g.add_argument("--repo", default=None,
+                   help="owner/repo of THIS repo (e.g. ${{ github.repository }}). "
+                        "Enables source-URL-qualified keys — REQUIRED when using a "
+                        "crawler-produced org-graph.yaml.")
     g.add_argument("--gate-at", default="high", choices=["low", "medium", "high"])
     g.add_argument("--out", default=None)
     g.set_defaults(func=cmd_gate)
 
     c = sub.add_parser("crawl", help="build the org-wide infra graph from GitHub")
-    c.add_argument("--org", required=True)
+    c.add_argument("--org", default=None, help="a single org")
+    c.add_argument("--orgs", default=None, help="comma-separated orgs (one token must read all)")
     c.add_argument("--out", default="org-graph.yaml")
     c.add_argument("--token", default=None, help="GitHub token (or GITHUB_TOKEN env)")
     c.add_argument("--max-repos", type=int, default=1000)
     c.set_defaults(func=cmd_crawl)
+
+    m = sub.add_parser("merge", help="merge several org-graph.yaml files into one")
+    m.add_argument("files", nargs="+", help="graph YAMLs to merge (e.g. per-org outputs)")
+    m.add_argument("--out", default="org-graph.yaml")
+    m.set_defaults(func=cmd_merge)
 
     args = ap.parse_args(argv)
     return args.func(args)

@@ -21,10 +21,11 @@ class BlastRadius:
         return len(self.affected)
 
 
-def compute(graph: InfraGraph, changed_files: list[str], root: str = ".") -> BlastRadius:
+def compute(graph: InfraGraph, changed_files: list[str], root: str = ".",
+            repo_slug: str | None = None) -> BlastRadius:
     changed_nodes: set[str] = set()
     for path in changed_files:
-        changed_nodes.update(nodes_for_path(path, root))
+        changed_nodes.update(nodes_for_path(path, root, repo_slug))
 
     affected: set[str] = set()
     for node in changed_nodes:

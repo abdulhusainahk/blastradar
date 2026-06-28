@@ -53,14 +53,43 @@ def test_owner_notification_for_affected_nodes():
     _, _ = report.render(br, risk.heuristic(br), gate_at="high", notify=handles)
 
 
-def test_crawler_module_name_normalization():
-    # Cross-repo git source with subdir + ref must resolve to the module name.
-    assert crawl._module_name("git::https://github.com/org/tf-modules//network?ref=v1.2") == "network"
-    assert crawl._module_name("../../modules/network") == "network"
+def test_git_source_keying_is_repo_qualified():
+    # Cross-repo git source -> (owner/repo, subdir); key never collides on bare name.
+    assert graph.parse_git_source("git::https://github.com/orgB/tf-modules//modules/network?ref=v1") \
+        == ("orgB/tf-modules", "modules/network")
+    assert graph.tf_producer("git::https://github.com/orgB/tf-modules//modules/network?ref=v1",
+                             "services/x/main.tf", "orgA/web") == "tfmodule:orgB/tf-modules//modules/network"
+    # Two different "network" modules in different repos get distinct keys.
+    a = graph.tf_producer("../../modules/network", "services/x/main.tf", "orgA/web")
+    b = graph.tf_producer("../../modules/network", "services/x/main.tf", "orgB/api")
+    assert a == "tfmodule:orgA/web//modules/network" and b == "tfmodule:orgB/api//modules/network" and a != b
 
 
 def test_crawler_parses_consumed_producers():
     tf = 'module "n" {\n  source = "git::https://github.com/org/mods//vpc?ref=v1"\n}'
-    assert crawl._producers_consumed("services/x/main.tf", tf) == ["tfmodule:vpc"]
+    assert crawl._producers_consumed("services/x/main.tf", tf, "org/web") == ["tfmodule:org/mods//vpc"]
     chart = "apiVersion: v2\nname: x\ndependencies:\n  - name: common\n    version: 1.0.0\n"
-    assert crawl._producers_consumed("charts/x/Chart.yaml", chart) == ["helmchart:common"]
+    assert crawl._producers_consumed("charts/x/Chart.yaml", chart, "org/web") == ["helmchart:common"]
+
+
+def test_qualified_gate_finds_cross_repo_consumer():
+    # An org-graph edge: orgA/web consumes orgB/tf-modules//modules/network.
+    g = graph.InfraGraph()
+    g.add_edge("repo:orgA/web", "tfmodule:orgB/tf-modules//modules/network")
+    g.add_node("repo:orgA/web", owners=["@orgA/web-team"])
+    # A PR in orgB/tf-modules edits that module -> the cross-repo consumer is in the radius.
+    br = radius.compute(g, ["modules/network/main.tf"], ".", repo_slug="orgB/tf-modules")
+    assert "repo:orgA/web" in br.affected
+    assert graph.owners_of(g, br.affected) == ["@orgA/web-team"]
+
+
+def test_merge_unions_graphs():
+    merged = crawl.merge([
+        {"edges": [{"consumer": "repo:a", "depends_on": "tfmodule:x"}], "owners": {"repo:a": ["@a"]}},
+        {"edges": [{"consumer": "repo:a", "depends_on": "tfmodule:x"},      # dup -> deduped
+                   {"consumer": "repo:b", "depends_on": "tfmodule:y"}],
+         "owners": {"repo:a": ["@a", "@a2"], "repo:b": ["@b"]}, "critical": ["repo:b"]},
+    ])
+    assert len(merged["edges"]) == 2
+    assert merged["owners"]["repo:a"] == ["@a", "@a2"]
+    assert merged["critical"] == ["repo:b"]
