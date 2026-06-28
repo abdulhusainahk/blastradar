@@ -1,0 +1,31 @@
+name: "BlastRadar"
+description: "Infra-aware blast-radius change-risk gate for pull requests."
+branding:
+  icon: "git-pull-request"
+  color: "red"
+inputs:
+  root:
+    description: "Repo root to scan for IaC."
+    default: "."
+  consumers:
+    description: "Path to consumers.yaml (cross-repo edges)."
+    default: "consumers.yaml"
+  gate-at:
+    description: "Block the merge at this risk level or above (low|medium|high)."
+    default: "high"
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      run: pip install -r "${{ github.action_path }}/requirements.txt"
+    - shell: bash
+      env:
+        PYTHONPATH: ${{ github.action_path }}
+      run: |
+        BASE="${{ github.event.pull_request.base.sha }}"
+        FILES=$(git diff --name-only "$BASE"...HEAD)
+        python -m blastradar --root "${{ inputs.root }}" \
+          --consumers "${{ inputs.consumers }}" \
+          --gate-at "${{ inputs.gate-at }}" \
+          --out "$GITHUB_WORKSPACE/blastradar-report.md" \
+          --changed $FILES

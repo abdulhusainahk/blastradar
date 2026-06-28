@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stream-web
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          image: registry.example.test/stream-web:latest
+          envFrom:
+            - configMapRef:
+                name: app-config        # <- consumes ConfigMap 'app-config'

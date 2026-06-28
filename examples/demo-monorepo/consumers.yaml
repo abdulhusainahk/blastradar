@@ -1,0 +1,12 @@
+# Cross-repo edges that static parsing of THIS repo can't see, plus criticality
+# flags. This is how BlastRadar knows an out-of-repo service consumes a shared
+# artifact (the gap that lets AI-authored PRs ship "high blast radius" changes).
+edges:
+  - consumer: repo:mobile-bff       # lives in another repo, imports the network module
+    depends_on: tfmodule:network
+  - consumer: repo:web-frontend
+    depends_on: helmchart:stream
+
+critical:
+  - service:payments
+  - repo:mobile-bff

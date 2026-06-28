@@ -1,0 +1,6 @@
+apiVersion: v2
+name: stream
+version: 0.1.0
+dependencies:
+  - name: common
+    version: 1.x.x

@@ -1,0 +1,3 @@
+PyYAML>=6.0
+# Optional: enables the Claude-written risk narrative (heuristic works without it).
+anthropic>=0.40.0

@@ -1,0 +1,7 @@
+replicaCount: 3
+image:
+  repository: registry.example.test/stream-web
+  tag: latest
+ingress:
+  enabled: true
+  host: live.example.test

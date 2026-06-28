@@ -1,0 +1,49 @@
+name: blastradar
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest ruff
+      - run: ruff check .
+      - run: pytest -q
+
+  blast-radius:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write   # to post the report comment
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0       # need the base commit to diff
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Compute blast radius (dogfoods the demo monorepo)
+        id: br
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          FILES=$(git diff --name-only "$BASE"...HEAD)
+          echo "changed: $FILES"
+          python -m blastradar --root . \
+            --consumers examples/demo-monorepo/consumers.yaml \
+            --gate-at high --out report.md --changed $FILES
+      - name: Comment the report on the PR
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment ${{ github.event.pull_request.number }} --body-file report.md
