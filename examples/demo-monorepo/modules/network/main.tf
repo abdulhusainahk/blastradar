@@ -7,3 +7,6 @@ resource "aws_vpc" "this" {
 }
 
 output "vpc_id" { value = aws_vpc.this.id }
+
+# demo change: widen the shared VPC CIDR — affects every consumer of this module
+variable "enable_flow_logs" { default = true }
