@@ -24,7 +24,7 @@ from . import crawl, graph, radius, report, risk
 def _git_changed(base: str, root: str) -> list[str]:
     out = subprocess.check_output(
         ["git", "-C", root, "diff", "--name-only", f"{base}...HEAD"], text=True)
-    return [l.strip() for l in out.splitlines() if l.strip()]
+    return [ln.strip() for ln in out.splitlines() if ln.strip()]
 
 
 def cmd_gate(args) -> int:
