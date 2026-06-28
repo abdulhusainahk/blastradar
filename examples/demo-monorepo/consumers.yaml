@@ -10,3 +10,10 @@ edges:
 critical:
   - service:payments
   - repo:mobile-bff
+
+# Who to @-mention when their service lands in the blast radius (from CODEOWNERS
+# when produced by `blastradar crawl`; hand-written here for the demo).
+owners:
+  repo:mobile-bff: ["@demo-org/mobile-team"]
+  repo:web-frontend: ["@demo-org/frontend-team"]
+  service:payments: ["@demo-org/payments-team"]

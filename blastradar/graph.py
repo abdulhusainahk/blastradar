@@ -211,18 +211,32 @@ def _k8s_workloads(full: str):
 
 
 def _apply_consumers(g: InfraGraph, consumers_file: str) -> None:
-    """consumers.yaml: declarative cross-repo edges + criticality flags.
+    """consumers.yaml / org-graph.yaml: cross-repo edges, criticality, owners.
 
     edges:
       - consumer: repo:mobile-bff
         depends_on: tfmodule:network
     critical: [service:payments, repo:mobile-bff]
+    owners:
+      repo:mobile-bff: ["@org/mobile-team"]
     """
     data = yaml.safe_load(open(consumers_file, encoding="utf-8")) or {}
     for e in data.get("edges", []) or []:
         g.add_edge(e["consumer"], e["depends_on"])
     for node in data.get("critical", []) or []:
         g.add_node(node, critical=True)
+    for node, owners in (data.get("owners", {}) or {}).items():
+        g.add_node(node, owners=list(owners))
+
+
+def owners_of(graph: InfraGraph, nodes) -> list[str]:
+    """Unique CODEOWNERS handles to notify for a set of affected nodes."""
+    handles: list[str] = []
+    for n in nodes:
+        for h in graph.meta.get(n, {}).get("owners", []) or []:
+            if h not in handles:
+                handles.append(h)
+    return handles
 
 
 def _owning_node(rel: str) -> str:

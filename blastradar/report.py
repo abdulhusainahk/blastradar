@@ -6,8 +6,12 @@ from .radius import BlastRadius
 EMOJI = {"low": "🟢", "medium": "🟡", "high": "🔴"}
 
 
-def render(br: BlastRadius, risk: dict, *, gate_at: str = "high") -> tuple[str, bool]:
-    """Return (markdown, gate_passed). gate fails when risk_level >= gate_at."""
+def render(br: BlastRadius, risk: dict, *, gate_at: str = "high",
+           notify: list[str] | None = None) -> tuple[str, bool]:
+    """Return (markdown, gate_passed). gate fails when risk_level >= gate_at.
+
+    `notify` is a list of CODEOWNERS handles for the affected downstream nodes.
+    """
     order = ["low", "medium", "high"]
     passed = order.index(risk["risk_level"]) < order.index(gate_at)
 
@@ -27,7 +31,10 @@ def render(br: BlastRadius, risk: dict, *, gate_at: str = "high") -> tuple[str, 
         lines.append("")
     lines += [
         f"**Recommended rollout:** {risk['recommended_rollout']}",
-        f"**Notify owners of:** {', '.join(risk.get('owners_to_notify', [])) or '—'}",
+    ]
+    if notify:
+        lines.append(f"**👥 Downstream owners — please review:** {' '.join(notify)}")
+    lines += [
         "",
         ("✅ **Gate: PASS** — safe to merge under policy."
          if passed else

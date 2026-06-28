@@ -49,19 +49,47 @@ python -m blastradar --root examples/demo-monorepo --changed services/checkout/m
 
 Set `ANTHROPIC_API_KEY` to get the Claude-written narrative instead of the bare heuristic.
 
-## Use it as a GitHub Action
+## Set it up for a GitHub **organization** (v0.2)
+
+At org scale you don't hand-write `consumers.yaml` — the crawler builds it from every repo.
+
+**1. Central config repo — crawl the org nightly.** Create `<org>/blastradar-config` and add
+[`examples/org-setup/01-crawl-nightly.yml`](examples/org-setup/01-crawl-nightly.yml). It runs:
+
+```bash
+GITHUB_TOKEN=... python -m blastradar crawl --org <org> --out org-graph.yaml
+```
+
+The crawler lists every repo, parses its IaC (Terraform module sources incl. cross-repo
+`git::` refs, Helm deps, container bases), and reads each repo's **CODEOWNERS**, producing an
+`org-graph.yaml` of `repo:<x> → producer` edges + owners. It commits that file back.
+
+**2. Per-repo gate.** Add [`examples/org-setup/02-gate-in-each-repo.yml`](examples/org-setup/02-gate-in-each-repo.yml)
+to each repo you want gated. On every PR it pulls `org-graph.yaml`, computes the blast radius,
+comments the report, **@-mentions the downstream owners**, and **fails the check on HIGH**.
 
 ```yaml
 - uses: abdulhusainahk/blastradar@v0
-  with:
-    root: "."
-    consumers: "consumers.yaml"
-    gate-at: "high"     # block merge at this risk level or above
+  with: { root: ".", consumers: ".blastradar/org-graph.yaml", gate-at: "high" }
+  env:  { ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }} }   # optional narrative
 ```
 
-It diffs against the PR base, posts the report as a PR comment, and fails the check when the
-gate blocks. See [`.github/workflows/blastradar.yml`](.github/workflows/blastradar.yml) (which
-dogfoods this repo's demo monorepo).
+**3. Secrets/permissions:** an org-read token (or GitHub App install token) as
+`BLASTRADAR_ORG_READ_TOKEN`, the gate job needs `pull-requests: write`, and optionally
+`ANTHROPIC_API_KEY` for Claude's narrative. Make the check **required** in branch protection
+to actually block merges.
+
+### Validate it on GitHub
+1. Open a PR in a gated repo that edits a **shared** artifact (a Terraform module others use).
+2. The `blastradar` check runs → a comment appears: risk level, the exact downstream services,
+   recommended rollout, and `@owner` mentions.
+3. On HIGH the check is **red** → with branch protection on, **Merge is blocked** until a senior
+   review / staged-rollout sign-off.
+4. Open a second PR touching only a **leaf** file → green check, merge allowed. That contrast is
+   the demo.
+
+This repo's own [`.github/workflows/blastradar.yml`](.github/workflows/blastradar.yml) dogfoods
+the gate against the demo monorepo, so the first PR you open here shows it live.
 
 ## `consumers.yaml` — the cross-repo edges parsing can't see
 
@@ -78,10 +106,10 @@ radius" changes — it makes out-of-repo consumers visible to the gate.
 
 ## Roadmap
 
-- **v0.1** — Terraform/Helm/K8s/Docker parsing, blast-radius gate, heuristic + Claude, GitHub Action *(this release)*
-- **v0.2** — auto-crawl an org's repos to build `consumers.yaml` instead of hand-maintaining it
-- **v0.3** — downstream-owner auto-notification + CODEOWNERS-aware reviewer escalation
-- **v0.4** — MCP tool wrapper ("what's the blast radius of bumping module X?") + risk trend dashboard
+- **v0.1** — Terraform/Helm/K8s/Docker parsing, blast-radius gate, heuristic + Claude, GitHub Action
+- **v0.2** — ✅ org-wide crawler (auto-builds the graph from all repos) + ✅ CODEOWNERS-based downstream-owner @-mentions *(this release)*
+- **v0.3** — GitHub App (no PATs), incremental crawl + caching, reviewer auto-request where collaborators allow
+- **v0.4** — MCP tool wrapper ("what's the blast radius of bumping module X?") + risk-trend dashboard
 
 ## License
 

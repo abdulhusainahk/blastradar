@@ -1,0 +1,42 @@
+# Add this to EACH repo that should be gated: .github/workflows/blastradar.yml
+# It pulls the org-graph.yaml the central crawl produced, computes the blast
+# radius of the PR, comments the report, and fails the check on HIGH risk.
+name: blastradar
+
+on:
+  pull_request:
+
+jobs:
+  blast-radius:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write       # to post the report comment
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # need the base commit to diff
+
+      # Pull the org-wide graph from the central config repo.
+      - name: Fetch org graph
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/blastradar-config
+          path: .blastradar
+          token: ${{ secrets.BLASTRADAR_ORG_READ_TOKEN }}
+
+      - name: Run gate
+        uses: ${{ github.repository_owner }}/blastradar@v0
+        with:
+          root: "."
+          consumers: ".blastradar/org-graph.yaml"
+          gate-at: "high"
+        env:
+          # Optional: enables Claude's plain-English narrative + rollout advice.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Comment report on the PR
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment ${{ github.event.pull_request.number }} --body-file blastradar-report.md

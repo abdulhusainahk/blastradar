@@ -1,0 +1,33 @@
+# Place this in a CENTRAL config repo (e.g. <org>/blastradar-config).
+# It rebuilds the org-wide infra graph nightly and commits org-graph.yaml,
+# which every repo's PR gate then reads. Manual run supported via the button.
+name: blastradar-crawl
+
+on:
+  schedule:
+    - cron: "0 2 * * *"     # 02:00 UTC nightly
+  workflow_dispatch:
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # to commit org-graph.yaml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install blastradar   # or: pip install git+https://github.com/<org>/blastradar
+      - name: Crawl the org
+        env:
+          # A token (or GitHub App installation token) with READ access to org repos.
+          GITHUB_TOKEN: ${{ secrets.BLASTRADAR_ORG_READ_TOKEN }}
+        run: python -m blastradar crawl --org ${{ github.repository_owner }} --out org-graph.yaml
+      - name: Commit updated graph
+        run: |
+          git config user.name  "blastradar[bot]"
+          git config user.email "blastradar@users.noreply.github.com"
+          git add org-graph.yaml
+          git diff --cached --quiet || git commit -m "chore: refresh org infra graph"
+          git push

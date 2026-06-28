@@ -24,7 +24,7 @@ runs:
       run: |
         BASE="${{ github.event.pull_request.base.sha }}"
         FILES=$(git diff --name-only "$BASE"...HEAD)
-        python -m blastradar --root "${{ inputs.root }}" \
+        python -m blastradar gate --root "${{ inputs.root }}" \
           --consumers "${{ inputs.consumers }}" \
           --gate-at "${{ inputs.gate-at }}" \
           --out "$GITHUB_WORKSPACE/blastradar-report.md" \
