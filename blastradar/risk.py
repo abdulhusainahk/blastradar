@@ -48,7 +48,7 @@ def assess(br: BlastRadius, changed_files: list[str], high_threshold: int = 3) -
         return base
     try:
         narrative = _claude(br, changed_files, base)
-    except Exception as exc:  # never let the LLM break the gate — fall back
+    except Exception as exc:  # noqa: BLE001 — never let the LLM break the gate; fall back
         base["llm_error"] = str(exc)
         return base
     return {**base, **{k: narrative[k] for k in NARRATIVE_FIELDS if narrative.get(k)},

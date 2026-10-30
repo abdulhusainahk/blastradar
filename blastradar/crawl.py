@@ -83,7 +83,7 @@ class OrgCrawler:
         try:
             data = self._get(f"{API}/repos/{self.org}/{repo}/git/trees/{branch}",
                              {"recursive": "1"}).json()
-        except Exception:
+        except (OSError, ValueError):
             return []
         return [t["path"] for t in data.get("tree", []) if t.get("type") == "blob"]
 
@@ -91,10 +91,10 @@ class OrgCrawler:
         try:
             data = self._get(f"{API}/repos/{self.org}/{repo}/contents/{path}",
                              {"ref": branch}).json()
-            if data.get("encoding") == "base64":
-                return base64.b64decode(data["content"]).decode("utf-8", "replace")
-        except Exception:
-            pass
+        except (OSError, ValueError):
+            return ""
+        if isinstance(data, dict) and data.get("encoding") == "base64":
+            return base64.b64decode(data["content"]).decode("utf-8", "replace")
         return ""
 
     def codeowners(self, repo: str, branch: str) -> list[str]:

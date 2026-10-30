@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 from collections import defaultdict, deque
+from pathlib import Path
 
 import yaml
 
@@ -54,7 +55,7 @@ def parse_git_source(source: str):
         return None
     after = source.split("github.com", 1)[1].lstrip(":/").split("?", 1)[0]
     repo_part, subdir = (after.split("//", 1) + [""])[:2]
-    owner_repo = repo_part[:-4] if repo_part.endswith(".git") else repo_part
+    owner_repo = repo_part.removesuffix(".git")
     return owner_repo.strip("/"), subdir.strip("/")
 
 
@@ -191,7 +192,7 @@ def _parse_terraform(g: InfraGraph, full: str, rel: str, repo_slug: str | None =
     consumer = _owning_node(rel)
     g.add_node(consumer)
     try:
-        text = open(full, encoding="utf-8").read()
+        text = Path(full).read_text(encoding="utf-8")
     except OSError:
         return
     for source in MODULE_SOURCE.findall(text):
@@ -206,7 +207,7 @@ def _parse_dockerfile(g: InfraGraph, full: str, rel: str) -> None:
     img = f"image:{svc}"
     g.add_node(img)
     try:
-        text = open(full, encoding="utf-8").read()
+        text = Path(full).read_text(encoding="utf-8")
     except OSError:
         return
     for base in DOCKER_FROM.findall(text):
@@ -220,7 +221,7 @@ def _parse_helm_chart(g: InfraGraph, full: str, rel: str) -> None:
     node = f"helmchart:{chart}"
     g.add_node(node)
     try:
-        data = yaml.safe_load(open(full, encoding="utf-8")) or {}
+        data = yaml.safe_load(Path(full).read_text(encoding="utf-8")) or {}
     except (OSError, yaml.YAMLError):
         return
     for dep in data.get("dependencies", []) or []:
@@ -239,7 +240,7 @@ def _parse_k8s(g: InfraGraph, full: str) -> None:
 
 def _k8s_workloads(full: str):
     try:
-        docs = list(yaml.safe_load_all(open(full, encoding="utf-8")))
+        docs = list(yaml.safe_load_all(Path(full).read_text(encoding="utf-8")))
     except (OSError, yaml.YAMLError):
         return
     for doc in docs:
@@ -279,7 +280,7 @@ def _apply_consumers(g: InfraGraph, consumers_file: str) -> None:
     owners:
       repo:mobile-bff: ["@org/mobile-team"]
     """
-    data = yaml.safe_load(open(consumers_file, encoding="utf-8")) or {}
+    data = yaml.safe_load(Path(consumers_file).read_text(encoding="utf-8")) or {}
     for e in data.get("edges", []) or []:
         g.add_edge(e["consumer"], e["depends_on"])
     for node in data.get("critical", []) or []:
