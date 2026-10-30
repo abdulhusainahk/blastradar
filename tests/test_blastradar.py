@@ -93,3 +93,15 @@ def test_merge_unions_graphs():
     assert len(merged["edges"]) == 2
     assert merged["owners"]["repo:a"] == ["@a", "@a2"]
     assert merged["critical"] == ["repo:b"]
+
+
+def test_claude_cannot_override_gate(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    monkeypatch.setattr(risk, "_claude", lambda *_: {
+        "risk_level": "low", "summary": "looks fine", "recommended_rollout": "ship it",
+        "source": "claude-opus-4-8"})
+    br = radius.compute(_graph(), ["modules/network/main.tf"], ROOT)
+    r = risk.assess(br, ["modules/network/main.tf"])
+    assert r["risk_level"] == "high" and r["summary"] == "looks fine"
+    _, passed = report.render(br, r, gate_at="high")
+    assert passed is False

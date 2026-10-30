@@ -6,8 +6,9 @@ Two modes:
   * Claude (when ANTHROPIC_API_KEY is set) — a plain-English explanation plus a
     recommended rollout strategy, grounded in the heuristic facts.
 
-The heuristic always runs; Claude enriches it. This keeps the gate usable in CI
-without an API key, and testable offline.
+The heuristic always runs and alone decides `risk_level` (and so the gate);
+Claude only rewrites the narrative fields. This keeps the gate deterministic,
+usable in CI without an API key, and testable offline.
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ import os
 from .radius import BlastRadius
 
 LEVELS = ["low", "medium", "high"]
+NARRATIVE_FIELDS = ("summary", "recommended_rollout")
 
 
 def heuristic(br: BlastRadius, high_threshold: int = 3) -> dict:
@@ -45,10 +47,12 @@ def assess(br: BlastRadius, changed_files: list[str], high_threshold: int = 3) -
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return base
     try:
-        return _claude(br, changed_files, base)
+        narrative = _claude(br, changed_files, base)
     except Exception as exc:  # never let the LLM break the gate — fall back
         base["llm_error"] = str(exc)
         return base
+    return {**base, **{k: narrative[k] for k in NARRATIVE_FIELDS if narrative.get(k)},
+            "source": f"heuristic + {narrative['source']}"}
 
 
 def _claude(br: BlastRadius, changed_files: list[str], base: dict) -> dict:
@@ -58,12 +62,10 @@ def _claude(br: BlastRadius, changed_files: list[str], base: dict) -> dict:
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "risk_level": {"type": "string", "enum": LEVELS},
             "summary": {"type": "string"},
             "recommended_rollout": {"type": "string"},
-            "owners_to_notify": {"type": "array", "items": {"type": "string"}},
         },
-        "required": ["risk_level", "summary", "recommended_rollout", "owners_to_notify"],
+        "required": list(NARRATIVE_FIELDS),
     }
     facts = {
         "changed_files": changed_files,
@@ -80,8 +82,9 @@ def _claude(br: BlastRadius, changed_files: list[str], base: dict) -> dict:
         thinking={"type": "adaptive"},
         system=(
             "You are a release-risk reviewer for infrastructure changes. Given the precomputed "
-            "blast radius of a pull request, explain in 2-4 sentences what could break downstream "
-            "and why, then recommend a concrete rollout strategy. Be specific about which services "
+            "blast radius and risk level of a pull request, explain in 2-4 sentences what could "
+            "break downstream and why, then recommend a concrete rollout strategy consistent with "
+            "that risk level. Be specific about which services "
             "carry risk. Do not understate risk when critical consumers are hit. Ground every claim "
             "in the provided facts — do not invent services that aren't listed."
         ),
