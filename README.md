@@ -24,13 +24,14 @@ On a pull request that touches IaC, BlastRadar:
    cross-repo edges from `consumers.yaml`.
 2. **Computes the real blast radius** of the diff — every downstream service/repo that
    transitively depends on what changed.
-3. **Assesses risk** — a deterministic heuristic always runs; with `ANTHROPIC_API_KEY` set,
-   **Claude** (`claude-opus-4-8`) writes a plain-English explanation + a recommended rollout.
+3. **Assesses risk** — a deterministic heuristic sets the risk level, and only the heuristic
+   decides the gate. With `ANTHROPIC_API_KEY` set, **Claude** (`claude-opus-4-8`) rewrites the
+   explanation + recommended rollout, but cannot change the risk level or the pass/block result.
 4. **Gates the merge** — posts a PR comment + check, and **fails** above your risk threshold.
 
 ```
 PR diff ─▶ detect IaC ─▶ build infra graph ─▶ reverse-reachability ─▶ risk + rollout ─▶ gate
-                                              (who consumes what?)     (heuristic|Claude)  (PR check)
+                                              (who consumes what?)     (heuristic)         (PR check)
 ```
 
 ## Try it locally (no API key needed)
@@ -39,15 +40,15 @@ PR diff ─▶ detect IaC ─▶ build infra graph ─▶ reverse-reachability �
 pip install -r requirements.txt
 
 # HIGH: a shared Terraform module → 3 services + a cross-repo consumer
-python -m blastradar --root examples/demo-monorepo \
+python -m blastradar gate --root examples/demo-monorepo \
   --consumers examples/demo-monorepo/consumers.yaml \
   --changed modules/network/main.tf
 
 # LOW: a leaf service nobody depends on → safe to merge
-python -m blastradar --root examples/demo-monorepo --changed services/checkout/main.tf
+python -m blastradar gate --root examples/demo-monorepo --changed services/checkout/main.tf
 ```
 
-Set `ANTHROPIC_API_KEY` to get the Claude-written narrative instead of the bare heuristic.
+Set `ANTHROPIC_API_KEY` to get a Claude-written narrative; the risk level and gate result stay the same.
 
 ## Set it up for a GitHub **organization** (v0.2)
 
@@ -128,6 +129,25 @@ critical:
 
 This declarative registry is what closes the gap that lets AI-authored PRs ship "high blast
 radius" changes — it makes out-of-repo consumers visible to the gate.
+
+## Limitations
+
+BlastRadar v0 is deliberately dependency-light, which bounds what it can see:
+
+- **Parsing is regex/YAML, not a real HCL or Helm renderer.** Terraform `module` blocks with a
+  literal `source` are found; sources built from variables, `for_each` modules, and anything
+  only visible after `helm template` (values-driven references) are not.
+- **Only static references count.** A service that reaches another over the network, a shared
+  database, or a DNS name has no edge unless it is declared in `consumers.yaml`.
+- **Kubernetes workloads link only to ConfigMaps/Secrets** via `envFrom`, `env.valueFrom` and
+  volumes. Service-to-Service, Ingress and RBAC relationships are not modelled.
+- **Risk is a size heuristic.** HIGH means "a critical consumer is hit or ≥3 services are
+  affected"; it does not know how risky the *change itself* is (a comment edit and a CIDR change
+  to the same module score the same).
+- **The crawler reads default branches only** and makes one API call per IaC file, so very large
+  orgs can hit GitHub rate limits; there is no caching yet.
+- **The gate only blocks merges if you make it a required check** in branch protection —
+  BlastRadar fails the check, GitHub enforces it.
 
 ## Roadmap
 
